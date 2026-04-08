@@ -4,7 +4,8 @@ import { IssueProject } from "../domain/model";
 export class InMemoryTopicStore implements TopicStore {
   private project: IssueProject = {
     projectId: crypto.randomUUID(),
-    name: "Проект Topomatic 360",
+    name: "BCF Topomatic Project",
+    version: "2.1",
     topics: []
   };
 

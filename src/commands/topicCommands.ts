@@ -1,16 +1,7 @@
-import { BcfService } from "../application/BcfService";
-import { BcfZipReader } from "../bcf/BcfZipReader";
-import { BcfZipWriter } from "../bcf/BcfZipWriter";
-import { InMemoryTopicStore } from "../infrastructure/InMemoryTopicStore";
-import { TopomaticAdapter } from "../topomatic/TopomaticAdapter";
+import { createService } from "../core/shared";
 
-const sharedStore = new InMemoryTopicStore();
-const sharedReader = new BcfZipReader();
-const sharedWriter = new BcfZipWriter();
-
-function createService(ctx: Context): BcfService {
-  const adapter = new TopomaticAdapter(ctx);
-  return new BcfService(sharedStore, sharedReader, sharedWriter, adapter, adapter);
+export async function bcf_open_browser(ctx: Context): Promise<void> {
+  await createService(ctx).openBrowser();
 }
 
 export async function bcf_import_archive(ctx: Context): Promise<void> {
@@ -22,19 +13,23 @@ export async function bcf_export_archive(ctx: Context): Promise<void> {
 }
 
 export async function bcf_create_topic(ctx: Context): Promise<void> {
-  await createService(ctx).createTopicFromSelection();
+  await createService(ctx).createTopic();
+}
+
+export async function bcf_edit_topic(ctx: Context): Promise<void> {
+  await createService(ctx).editTopicFromContext();
 }
 
 export async function bcf_open_topic(ctx: Context): Promise<void> {
-  await createService(ctx).openTopicFromActiveContext();
+  await createService(ctx).openTopicFromContext();
 }
 
 export async function bcf_quick_list(ctx: Context): Promise<void> {
-  await createService(ctx).openTopicQuickList();
+  await createService(ctx).openQuickList();
 }
 
 export async function bcf_add_comment(ctx: Context): Promise<void> {
-  await createService(ctx).addCommentFromActiveContext();
+  await createService(ctx).addCommentFromContext();
 }
 
 export async function bcf_refresh_tree(ctx: Context): Promise<void> {
@@ -42,7 +37,19 @@ export async function bcf_refresh_tree(ctx: Context): Promise<void> {
 }
 
 export async function bcf_delete_topic(ctx: Context): Promise<void> {
-  await createService(ctx).deleteTopicFromActiveContext();
+  await createService(ctx).deleteTopicFromContext();
+}
+
+export async function bcf_resolve_topic(ctx: Context): Promise<void> {
+  await createService(ctx).resolveTopicFromContext();
+}
+
+export async function bcf_close_topic(ctx: Context): Promise<void> {
+  await createService(ctx).closeTopicFromContext();
+}
+
+export async function bcf_reopen_topic(ctx: Context): Promise<void> {
+  await createService(ctx).reopenTopicFromContext();
 }
 
 export async function bcf_debug_context(ctx: Context): Promise<void> {

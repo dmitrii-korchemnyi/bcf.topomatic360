@@ -28,8 +28,8 @@ export function buildTopicChildren(topic: IssueTopic): BcfTreeNode[] {
     kind: "viewpoint" as const,
     topicGuid: topic.guid,
     label: `Вид ${index + 1}`,
-    description: viewpoint.title,
-    tooltip: viewpoint.title,
+    description: viewpoint.snapshotFileName || viewpoint.title || "Viewpoint",
+    tooltip: viewpoint.title || "Viewpoint",
     contextValue: "bcfViewpointContext",
     command: "bcf_open_topic"
   }));
@@ -50,9 +50,5 @@ export function buildTopicChildren(topic: IssueTopic): BcfTreeNode[] {
 
 function formatDate(value: string): string {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleString("ru-RU");
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("ru-RU");
 }

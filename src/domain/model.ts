@@ -1,6 +1,9 @@
-export type IssueStatus = "Открыто" | "В работе" | "На проверке" | "Устранено" | "Закрыто" | "Отклонено";
-export type IssuePriority = "Низкий" | "Обычный" | "Высокий" | "Критический";
+export type BcfVersion = "2.1" | "3.0" | "3.1";
+
+export type IssueStatus = "Активно" | "Устранено" | "Закрыто";
+export type IssuePriority = "Не задан" | "Низкий" | "Обычный" | "Высокий" | "Критический";
 export type IssueType = "Замечание" | "Коллизия" | "Проверка" | "Вопрос" | "Предложение" | "Ошибка моделирования";
+export type ComponentsMode = "Видимые" | "Выбранные" | "Все связанные";
 
 export interface Point3D {
   x: number;
@@ -12,6 +15,7 @@ export interface CameraState {
   position: Point3D;
   direction: Point3D;
   up: Point3D;
+  fieldOfView?: number;
 }
 
 export interface ComponentRef {
@@ -21,6 +25,9 @@ export interface ComponentRef {
   layerName?: string;
   elementName?: string;
   elementType?: string;
+  selected?: boolean;
+  visible?: boolean;
+  color?: string;
 }
 
 export interface Viewpoint {
@@ -29,7 +36,7 @@ export interface Viewpoint {
   snapshotFileName?: string;
   snapshotBase64?: string;
   camera?: CameraState;
-  componentsMode: "Видимые" | "Выбранные" | "Все связанные";
+  componentsMode: ComponentsMode;
   components: ComponentRef[];
 }
 
@@ -38,6 +45,8 @@ export interface CommentItem {
   author: string;
   date: string;
   message: string;
+  modifiedDate?: string;
+  modifiedAuthor?: string;
 }
 
 export interface IssueTopic {
@@ -64,5 +73,21 @@ export interface IssueTopic {
 export interface IssueProject {
   projectId: string;
   name: string;
+  version: BcfVersion;
   topics: IssueTopic[];
+}
+
+export interface TopicEditorInput {
+  guid?: string;
+  number?: number;
+  title: string;
+  description: string;
+  status: IssueStatus;
+  priority: IssuePriority;
+  type: IssueType;
+  labels: string[];
+  assignedTo?: string;
+  area?: string;
+  milestone?: string;
+  deadline?: string;
 }
