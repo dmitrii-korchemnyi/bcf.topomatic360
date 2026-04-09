@@ -41,15 +41,6 @@ npm run serve
 Плагин распространяется через GitHub Pages.
 https://dmitrii-korchemnyi.github.io/dkorchemnyi.topomatic360.bcf/
 
-Ссылка для установки:
-https://360.topomatic.ru?extensionInstallPath=https://dmitrii-korchemnyi.github.io/dkorchemnyi.topomatic360.bcf/
-
----
-
-## Примечания
-
-Часть функций зависит от API Topomatic 360 и не может быть полностью протестирована вне среды платформы.
-
 ---
 
 ## Лицензия
