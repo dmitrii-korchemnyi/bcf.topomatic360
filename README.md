@@ -1,4 +1,4 @@
-# dkorchemnyi.topomatic360.bcf
+# bcf.topomatic360
 
 A small BCF plugin for Topomatic 360.
 
