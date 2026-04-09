@@ -1,34 +1,117 @@
-# BCF Manager for Topomatic 360
+# dkorchemnyi.topomatic360.bcf
 
-Refactored plugin for Topomatic 360 / Albatros.
+A small BCF plugin for Topomatic 360.
 
-## What is inside
+The goal is simple: open BCF issues, review viewpoints, and export them back to BCFZIP without leaving the platform.
 
-- import/export of BCFZIP with selectable BCF versions 2.0 / 2.1 / 3.0
-- separate manager window and editor window in BIMcollab-like workflow
-- Russian UI
-- tree view with topics / viewpoints / comments
-- manifest aligned with Albatros actions / menu / pages / views / statusbar
+Author: Dmitrii Korchemnyi
 
-## Project structure
+---
 
-- `src/commands` — command handlers
-- `src/providers` — treeview providers
-- `src/application` — use cases
-- `src/bcf` — BCF import/export engine
-- `src/topomatic` — Topomatic host adapter
-- `src/ui` — dialogs
-- `src/domain` — models and contracts
+## Status
 
-## Build on Windows
+Prototype. Core logic is implemented, integration with Topomatic 360 is still in progress.
 
-```powershell
+---
+
+## Features
+
+* Import BCFZIP
+* Export BCFZIP
+* Issue list rendering
+* Viewpoint navigation (partial)
+* Add comments
+* In-memory topic storage
+
+---
+
+## Development
+
+```bash
 npm install
-npm run typecheck
+npm run check
 npm run build
 npm run serve
 ```
 
-## Install
+---
 
-Build output is generated into `dist/` and can be published to GitHub Pages or packed as APX.
+## Installation
+
+Pages (debug / check):
+https://dmitrii-korchemnyi.github.io/dkorchemnyi.topomatic360.bcf/
+
+Install in Topomatic 360:
+https://360.topomatic.ru?extensionInstallPath=https://dmitrii-korchemnyi.github.io/dkorchemnyi.topomatic360.bcf/
+
+---
+
+## Notes
+
+Some features depend on Topomatic 360 host APIs and cannot be fully tested outside the platform.
+
+---
+
+## License
+
+MIT
+
+---
+
+# Русская версия
+
+Плагин BCF для Topomatic 360.
+
+Открывает замечания из BCF, просматривает viewpoints и выгружает их обратно в BCF прямо внутри платформы Томатик360.
+
+Автор: Дмитрий Корчемный
+
+---
+
+## Статус
+
+Прототип. Основная логика реализована, интеграция с API Topomatic 360 находится в процессе.
+
+---
+
+## Возможности
+
+* Импорт BCFZIP
+* Экспорт BCFZIP
+* Отображение списка замечаний
+* Навигация по viewpoint (частично)
+* Добавление комментариев
+* Хранение данных в памяти
+
+---
+
+## Разработка
+
+```bash
+npm install
+npm run check
+npm run build
+npm run serve
+```
+
+---
+
+## Установка
+
+Плагин распространяется через GitHub Pages.
+https://dmitrii-korchemnyi.github.io/dkorchemnyi.topomatic360.bcf/
+
+Ссылка для установки:
+https://360.topomatic.ru?extensionInstallPath=https://dmitrii-korchemnyi.github.io/dkorchemnyi.topomatic360.bcf/
+
+---
+
+## Примечания
+
+Часть функций зависит от API Topomatic 360 и не может быть полностью протестирована вне среды платформы.
+
+---
+
+## Лицензия
+
+MIT

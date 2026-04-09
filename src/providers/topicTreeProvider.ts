@@ -1,52 +1,51 @@
-import { TopicStore } from "../domain/contracts";
-import { IssueTopic } from "../domain/model";
+import { UiController } from "../domain/contracts";
+import { IssueProject, IssueTopic } from "../domain/model";
+import { displayDate } from "../utils/dates";
+import { treeBus } from "../utils/treeBus";
 
-export interface BcfTreeItem extends TreeItem {
-  kind: "topic" | "viewpoint" | "comment";
-  topicGuid: string;
-}
+type BcfTreeItem = TreeItem & { nodeType: "topic" | "comment" | "viewpoint"; topicGuid: string; payloadGuid?: string };
 
-export function buildTopicTreeProvider(ctx: Context, store: TopicStore): TreeViewOptions<BcfTreeItem> {
-  const onDidChangeTreeData = ctx.createEventHandler<string | void>();
-  const treeview = ctx.treeview as TreeView<BcfTreeItem>;
-  treeview.onDidBroadcast((e) => {
-    if (e.event === "changeActiveWindow" || e.event === "ss:changed") {
-      onDidChangeTreeData.fire();
-    }
-  });
-
+function topicItem(topic: IssueTopic): BcfTreeItem {
   return {
-    treeDataProvider: {
-      onDidChangeTreeData,
-      getChildren: async (element) => {
-        const project = await store.load();
-        if (!element) {
-          return project.topics.map((topic) => topicToTreeItem(topic));
-        }
-        const topic = project.topics.find((item) => item.guid === element.topicGuid);
-        if (!topic) return [];
-        if (element.kind === "topic") {
-          return [
-            ...topic.viewpoints.map((vp) => ({ id: `vp:${vp.guid}`, label: `Вид ${vp.index + 1}`, kind: "viewpoint", topicGuid: topic.guid, contextValue: "bcf.viewpoint" } satisfies BcfTreeItem)),
-            ...topic.comments.map((comment, index) => ({ id: `comment:${comment.guid}`, label: `Комментарий ${index + 1}`, description: comment.author, tooltip: comment.message, kind: "comment", topicGuid: topic.guid, contextValue: "bcf.comment" } satisfies BcfTreeItem))
-          ];
-        }
-        return [];
-      },
-      hasChildren: (element) => element.kind === "topic"
-    }
+    id: `topic:${topic.guid}`,
+    nodeType: "topic",
+    topicGuid: topic.guid,
+    label: `${topic.number}. ${topic.title}`,
+    description: topic.status,
+    tooltip: topic.description,
+    contextValue: "bcf-topic",
+    dblCommand: "bcf:focus-selected-topic"
   };
 }
 
-function topicToTreeItem(topic: IssueTopic): BcfTreeItem {
-  return {
-    id: `topic:${topic.guid}`,
-    label: `#${topic.number} ${topic.title}`,
-    description: topic.status,
-    tooltip: topic.description,
-    kind: "topic",
-    topicGuid: topic.guid,
-    contextValue: "bcf.topic",
-    dblCommand: "bcf:open-topic"
+export function buildTopicTreeProvider(service: UiController) {
+  return function bcf_build_tree(ctx: Context): TreeViewOptions<BcfTreeItem> {
+    const onDidChangeTreeData = ctx.createEventHandler<string | void>();
+    treeBus.subscribe(() => onDidChangeTreeData.fire());
+
+    return {
+      showCollapseAll: true,
+      treeDataProvider: {
+        onDidChangeTreeData,
+        async getChildren(element) {
+          const project: IssueProject = await service.getProject();
+          if (!element) {
+            return project.topics.map(topicItem);
+          }
+          const topic = project.topics.find(t => t.guid === element.topicGuid);
+          if (!topic) return [];
+          if (element.nodeType === "topic") {
+            const out: BcfTreeItem[] = [];
+            topic.viewpoints.forEach(vp => out.push({ id: `viewpoint:${topic.guid}:${vp.guid}`, nodeType: "viewpoint", topicGuid: topic.guid, payloadGuid: vp.guid, label: vp.title || `Viewpoint ${vp.guid.slice(0, 8)}`, description: `${vp.components.length} эл.`, contextValue: "bcf-viewpoint", dblCommand: "bcf:focus-selected-topic" }));
+            topic.comments.forEach(comment => out.push({ id: `comment:${topic.guid}:${comment.guid}`, nodeType: "comment", topicGuid: topic.guid, payloadGuid: comment.guid, label: comment.message.slice(0, 60) || "Комментарий", description: `${comment.author} · ${displayDate(comment.date)}`, tooltip: comment.message, contextValue: "bcf-comment" }));
+            return out;
+          }
+          return [];
+        },
+        hasChildren(element) {
+          return element.nodeType === "topic";
+        }
+      }
+    };
   };
 }

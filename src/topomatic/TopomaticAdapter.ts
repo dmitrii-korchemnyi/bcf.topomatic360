@@ -1,119 +1,122 @@
-import { IssueEditorOptions, IssueManagerController, ModelBridge, UiBridge } from "../domain/contracts";
-import { BcfVersion, IssueTopic } from "../domain/model";
+import { ModelBridge, UiBridge, UiController } from "../domain/contracts";
+import { ExportOptions, IssueTopic } from "../domain/model";
 import { mountIssueEditorDialog } from "../ui/issueEditorDialog";
 import { mountIssueManagerDialog } from "../ui/issueManagerDialog";
+import { treeBus } from "../utils/treeBus";
 
-function fileFilter(name: string, extensions: string[]): FileFilter {
-  return { name, extensions } as unknown as FileFilter;
-}
+type QuickItem<T extends string> = { label: string; value: T; description?: string };
 
 export class TopomaticAdapter implements UiBridge, ModelBridge {
   private readonly channel: OutputChannel;
 
-  constructor(private readonly ctx: Context) {
-    this.channel = ctx.createOutputChannel("BCF");
+  constructor(private readonly ctx: Context, private readonly settings?: ApplicationSettings) {
+    this.channel = this.ctx.createOutputChannel("BCF Manager");
   }
 
   async info(message: string): Promise<void> {
-    this.channel.appendLine(`[INFO] ${message}`);
-    await this.ctx.showMessage(message, "info");
+    this.channel.appendLine(message);
+    this.ctx.showMessage(message, "info");
   }
 
   async warn(message: string): Promise<void> {
     this.channel.appendLine(`[WARN] ${message}`);
-    await this.ctx.showMessage(message, "warning");
+    this.ctx.showMessage(message, "warning");
   }
 
   async error(message: string): Promise<void> {
     this.channel.appendLine(`[ERROR] ${message}`);
-    await this.ctx.showMessage(message, "error");
+    this.channel.show(false);
+    this.ctx.showMessage(message, "error");
   }
 
-  async inputBox(prompt: string, value = ""): Promise<string | undefined> {
-    const result = await this.ctx.showInputBox({ prompt, value });
-    return result || undefined;
+  async notifyDiagnostics(lines: string[], kind: "info" | "warning" | "error" = "info"): Promise<void> {
+    this.channel.clear();
+    lines.forEach(line => this.channel.appendLine(line));
+    this.channel.show(false);
+    if (lines[0]) await this.ctx.showMessage(lines[0], kind === "warning" ? "warning" : kind === "error" ? "error" : "info");
   }
 
-  async chooseVersion(title: string): Promise<BcfVersion | undefined> {
-    const items = [
-      { key: "2.0" as BcfVersion, label: "BCF 2.0" },
-      { key: "2.1" as BcfVersion, label: "BCF 2.1" },
-      { key: "3.0" as BcfVersion, label: "BCF 3.0" }
+  async promptVersion(kind: "import" | "export"): Promise<ExportOptions | undefined> {
+    const items: QuickItem<ExportOptions["version"]>[] = [
+      { label: "BCF 2.0", value: "2.0", description: `${kind === "export" ? "Экспорт" : "Импорт"} наиболее совместимого варианта` },
+      { label: "BCF 2.1", value: "2.1", description: "Стандартный production-вариант" },
+      { label: "BCF 3.0", value: "3.0", description: "Современный cloud-first вариант" }
     ];
-    const picked = await this.ctx.showQuickPick(items, { placeHolder: title });
-    return picked?.key;
+    const picked = await this.ctx.showQuickPick(items.map(i => ({ label: i.label, description: i.description })), { placeHolder: `Выберите версию BCF для ${kind === "export" ? "экспорта" : "импорта"}` });
+    if (!picked) return undefined;
+    const found = items.find(i => i.label === picked.label);
+    return found ? { version: found.value, container: ".bcfzip" } : undefined;
   }
 
-  async openBinaryFile(filters = ["bcfzip"]): Promise<Uint8Array | undefined> {
+  async promptComment(initial = ""): Promise<string | undefined> {
+    return this.ctx.showInputBox({ prompt: "Комментарий", value: initial, placeHolder: "Введите комментарий" });
+  }
+
+  async openImportFile(): Promise<Uint8Array | undefined> {
     const ws = await this.ctx.openDialog({
-      message: "Выберите BCF-файл",
-      filters: [fileFilter("BCF", filters)]
+      filters: [{ name: "BCF", extensions: ["bcfzip", "bcf"] }],
+      message: "Выберите BCF/BCFZIP файл"
     });
-    if (!ws) return undefined;
-    return ws.root.get();
+    return ws?.root?.get();
   }
 
-  async saveBinaryFile(suggestedName: string, data: Uint8Array): Promise<void> {
-    const ws = await this.ctx.saveDialog({
+  async saveArchive(defaultName: string): Promise<Workspace | undefined> {
+    return this.ctx.saveDialog({
       folder: false,
-      suggestedName,
-      buttonLabel: "Сохранить",
-      filters: [fileFilter("BCF", ["bcfzip"])],
-      message: "Сохранить BCF"
+      suggestedName: defaultName,
+      filters: [{ name: "BCF", extensions: ["bcfzip", "bcf"] }],
+      message: "Сохранить BCF пакет"
     });
-    await ws.root.put(data);
-    await ws.flush();
   }
 
-  async openIssueManager(controller: IssueManagerController): Promise<void> {
+  async openManagerWindow(service: UiController): Promise<void> {
     await this.ctx.showDefinedDialog({
-      title: controller.title,
+      title: "BCF Manager",
+      modal: false,
       hideButtons: true,
-      mount: (el) => mountIssueManagerDialog(el, controller)
+      mount: (el) => { void mountIssueManagerDialog(el, service); }
     });
   }
 
-  async openIssueEditor(topic: IssueTopic, options: IssueEditorOptions): Promise<IssueTopic | undefined> {
-    return new Promise<IssueTopic | undefined>((resolve) => {
-      let done = false;
-      this.ctx.showDefinedDialog({
-        title: options.mode === "create" ? "Создать замечание" : "Редактировать замечание",
-        hideButtons: true,
-        mount: (el) => mountIssueEditorDialog(el, topic, options, (value) => {
-          done = true;
-          resolve(value);
-        }, () => {
-          done = true;
-          resolve(undefined);
-        })
-      }).finally(() => {
-        if (!done) resolve(undefined);
-      });
+  async openEditorWindow(service: UiController, topicGuid?: string): Promise<void> {
+    await this.ctx.showDefinedDialog({
+      title: topicGuid ? "Редактирование замечания" : "Создание замечания",
+      modal: false,
+      hideButtons: true,
+      mount: (el) => { void mountIssueEditorDialog(el, service, topicGuid); }
     });
   }
 
   async getCurrentSelection(): Promise<unknown[]> {
-    const layer = this.ctx.cadview?.layer;
-    if (!layer) return [];
-    return [...layer.selectedObjects()];
+    const cadview = this.ctx.cadview;
+    if (!cadview) return [];
+    return Array.from(cadview.layer.selectedObjects());
   }
 
   async getCurrentSnapshotBase64(): Promise<string | undefined> {
     return undefined;
   }
 
-  async getCurrentCamera(): Promise<any> {
-    return undefined;
+  async getCurrentCamera(): Promise<unknown | undefined> {
+    return this.ctx.cadview?.camera;
   }
 
   async focusTopic(topic: IssueTopic): Promise<void> {
-    const components = topic.viewpoints[0]?.components ?? [];
-    const layer = this.ctx.cadview?.layer;
-    if (layer && components.length > 0) {
-      const ids = new Set(components.map((c) => c.elementId || c.authoringToolId || c.ifcGuid || c.guid));
-      layer.selectObjects((obj: any) => ids.has(String(obj?.id ?? obj?.elementId ?? obj?.ifcGuid ?? obj?.guid)), true);
+    const cadview = this.ctx.cadview;
+    if (!cadview) {
+      await this.warn("Откройте модель или чертёж, чтобы перейти к замечанию.");
+      return;
     }
-    this.ctx.setStatusBarMessage(`BCF: ${topic.title}`, 3000);
-    await this.info(`Открыто замечание #${topic.number}: ${topic.title}`);
+    const refs = topic.viewpoints[0]?.components ?? [];
+    if (refs.length) {
+      const idSet = new Set(refs.map(r => [r.elementId, r.ifcGuid, r.elementName].filter(Boolean).map(String)).flat());
+      cadview.layer.selectObjects((obj: any) => {
+        const values = [obj?.id, obj?.elementId, obj?.uid, obj?.ifcGuid, obj?.GlobalId, obj?.name, obj?.title].filter(Boolean).map(String);
+        return values.some(v => idSet.has(v));
+      }, true);
+    }
+    treeBus.emit();
+    this.ctx.setStatusBarMessage(`Открыто замечание: ${topic.number}. ${topic.title}`, 2500);
+    this.channel.appendLine(`Focus topic: ${topic.number}. ${topic.title}`);
   }
 }

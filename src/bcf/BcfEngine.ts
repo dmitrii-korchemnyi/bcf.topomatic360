@@ -1,393 +1,313 @@
 import JSZip from "jszip";
 import { convert, create } from "xmlbuilder2";
-import { BcfImportExport } from "../domain/contracts";
-import {
-  BcfVersion,
-  CommentItem,
-  ComponentRef,
-  IssueProject,
-  IssueTopic,
-  ValidationMessage,
-  ValidationResult,
-  Viewpoint
-} from "../domain/model";
-import { newGuid } from "../utils/ids";
+import { ArchiveReader, ArchiveWriter, Validator } from "../domain/contracts";
+import { BcfContainer, BcfVersion, ExportOptions, ImportResult, IssueProject, IssueTopic, ValidationMessage, ValidationResult, Viewpoint } from "../domain/model";
+import { guid } from "../utils/ids";
 
-function asArray<T>(value: T | T[] | undefined): T[] {
-  if (!value) return [];
+function asArray<T>(value: T | T[] | undefined | null): T[] {
+  if (value == null) return [];
   return Array.isArray(value) ? value : [value];
 }
 
-function textOf(node: any, fallback = ""): string {
-  if (node == null) return fallback;
-  if (typeof node === "string") return node;
-  if (typeof node === "number") return String(node);
-  if (typeof node === "object") {
-    if ("#" in node) return String(node["#"] ?? fallback);
-    if ("$" in node) return String(node["$"] ?? fallback);
+function toBuffer(base64?: string): Uint8Array | undefined {
+  if (!base64) return undefined;
+  const binary = atob(base64);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+function fromBuffer(buf?: Uint8Array): string | undefined {
+  if (!buf) return undefined;
+  let s = "";
+  for (const b of buf) s += String.fromCharCode(b);
+  return btoa(s);
+}
+
+function attr(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    return typeof obj["@Guid"] === "string" ? String(obj["@Guid"]) : undefined;
   }
-  return fallback;
+  return undefined;
 }
 
-function attr(node: any, name: string): string | undefined {
-  return node?.[`@${name}`] ?? node?.[name] ?? undefined;
+function titleForVersion(version: BcfVersion): string {
+  return version === "2.0" ? "2.0" : version === "2.1" ? "2.1" : "3.0";
 }
 
-function detectIssueStatus(value?: string): IssueTopic["status"] {
-  switch ((value ?? "").toLowerCase()) {
-    case "active":
-    case "open": return "Активно";
-    case "resolved": return "Устранено";
-    case "closed": return "Закрыто";
-    case "reopened": return "Переоткрыто";
-    case "in progress":
-    case "inprogress": return "В работе";
-    default: return "Новая";
+function makeVersionXml(version: BcfVersion): string {
+  return create({ version: "1.0", encoding: "UTF-8" })
+    .ele("Version", { VersionId: titleForVersion(version) })
+    .end({ prettyPrint: true });
+}
+
+function makeProjectXml(project: IssueProject): string {
+  return create({ version: "1.0", encoding: "UTF-8" })
+    .ele("ProjectExtension")
+    .ele("Project", { ProjectId: project.projectId })
+    .ele("Name").txt(project.name).up()
+    .up()
+    .up()
+    .end({ prettyPrint: true });
+}
+
+function buildMarkup(topic: IssueTopic, version: BcfVersion): string {
+  const root = create({ version: "1.0", encoding: "UTF-8" }).ele("Markup");
+  const t = root.ele("Topic", { Guid: topic.guid, TopicStatus: topic.status, TopicType: topic.type });
+  t.ele("Title").txt(topic.title).up();
+  if (topic.description) t.ele("Description").txt(topic.description).up();
+  t.ele("CreationDate").txt(topic.creationDate).up();
+  t.ele("CreationAuthor").txt(topic.creationAuthor).up();
+  if (topic.modifiedDate) t.ele("ModifiedDate").txt(topic.modifiedDate).up();
+  if (topic.modifiedAuthor) t.ele("ModifiedAuthor").txt(topic.modifiedAuthor).up();
+  if (topic.assignedTo) t.ele("AssignedTo").txt(topic.assignedTo).up();
+  if (topic.priority) t.ele("Priority").txt(topic.priority).up();
+  if (topic.deadline) t.ele("DueDate").txt(topic.deadline).up();
+  if (topic.area) t.ele("Labels").ele("Label").txt(topic.area).up().up();
+  t.up();
+
+  for (const comment of topic.comments) {
+    root.ele("Comment", { Guid: comment.guid })
+      .ele("Date").txt(comment.date).up()
+      .ele("Author").txt(comment.author).up()
+      .ele("Comment").txt(comment.message).up()
+      .up();
   }
-}
 
-function detectIssuePriority(value?: string): IssueTopic["priority"] {
-  switch ((value ?? "").toLowerCase()) {
-    case "low": return "Низкий";
-    case "high": return "Высокий";
-    case "critical": return "Критический";
-    default: return "Обычный";
+  if (topic.viewpoints.length > 0) {
+    const views = root.ele("Viewpoints");
+    for (const vp of topic.viewpoints) {
+      const fileName = `${vp.guid}.bcfv`;
+      const node = views.ele("ViewPoint");
+      if (version === "3.0") {
+        node.att("Guid", vp.guid).att("Viewpoint", fileName);
+      } else {
+        node.ele("Guid").txt(vp.guid).up();
+        node.ele("Viewpoint").txt(fileName).up();
+        if (vp.snapshotFileName) node.ele("Snapshot").txt(vp.snapshotFileName).up();
+      }
+      node.up();
+    }
+    views.up();
   }
+
+  return root.end({ prettyPrint: true });
 }
 
-function detectIssueType(value?: string): IssueTopic["type"] {
-  switch ((value ?? "").toLowerCase()) {
-    case "clash": return "Коллизия";
-    case "request":
-    case "question": return "Вопрос";
-    case "validation":
-    case "check": return "Проверка";
-    case "proposal": return "Предложение";
-    default: return "Замечание";
+function buildViewpoint(vp: Viewpoint): string {
+  const root = create({ version: "1.0", encoding: "UTF-8" }).ele("VisualizationInfo", { Guid: vp.guid });
+  if (vp.camera) {
+    const c = root.ele("PerspectiveCamera");
+    c.ele("CameraViewPoint").ele("X").txt(String(vp.camera.position.x)).up().ele("Y").txt(String(vp.camera.position.y)).up().ele("Z").txt(String(vp.camera.position.z)).up().up();
+    c.ele("CameraDirection").ele("X").txt(String(vp.camera.direction.x)).up().ele("Y").txt(String(vp.camera.direction.y)).up().ele("Z").txt(String(vp.camera.direction.z)).up().up();
+    c.ele("CameraUpVector").ele("X").txt(String(vp.camera.up.x)).up().ele("Y").txt(String(vp.camera.up.y)).up().ele("Z").txt(String(vp.camera.up.z)).up().up();
+    c.ele("FieldOfView").txt("60").up();
+    c.up();
   }
-}
-
-function toBcfStatus(value: IssueTopic["status"]): string {
-  switch (value) {
-    case "Активно": return "Open";
-    case "В работе": return "InProgress";
-    case "Устранено": return "Resolved";
-    case "Закрыто": return "Closed";
-    case "Переоткрыто": return "Reopened";
-    default: return "Open";
+  const comps = root.ele("Components");
+  const sel = comps.ele("Selection");
+  for (const comp of vp.components) {
+    sel.ele("Component", {
+      IfcGuid: comp.ifcGuid ?? undefined,
+      OriginatingSystem: comp.modelRef ?? undefined,
+      AuthoringToolId: comp.elementId ?? comp.elementName ?? undefined
+    }).up();
   }
+  sel.up();
+  comps.ele("Visibility", { DefaultVisibility: vp.componentsMode === "Видимые" ? "true" : "false" }).up();
+  comps.up();
+  return root.end({ prettyPrint: true });
 }
 
-function toBcfPriority(value: IssueTopic["priority"]): string {
-  switch (value) {
-    case "Низкий": return "Low";
-    case "Высокий": return "High";
-    case "Критический": return "Critical";
-    default: return "Normal";
-  }
-}
-
-function toBcfType(value: IssueTopic["type"]): string {
-  switch (value) {
-    case "Коллизия": return "Clash";
-    case "Вопрос": return "Question";
-    case "Проверка": return "Validation";
-    case "Предложение": return "Proposal";
-    default: return "Issue";
-  }
-}
-
-function parseXml(xml: string): any {
-  return convert(xml, { format: "object" });
-}
-
-function readVersionXml(xml: string): BcfVersion {
-  const doc = parseXml(xml);
-  const candidate = attr(doc?.Version, "VersionId") ?? textOf(doc?.VersionId) ?? textOf(doc?.Version?.VersionId);
-  if (candidate === "2.0" || candidate === "2.1" || candidate === "3.0") return candidate;
-  if (String(candidate).startsWith("2.0")) return "2.0";
-  if (String(candidate).startsWith("2.1")) return "2.1";
-  if (String(candidate).startsWith("3.0")) return "3.0";
+function parseVersion(xml?: string): BcfVersion {
+  if (!xml) return "2.1";
+  const obj = convert(xml, { format: "object" }) as any;
+  const versionId = obj?.Version?.["@VersionId"] ?? obj?.Version?.VersionId ?? obj?.Version?.["@versionId"];
+  if (String(versionId).startsWith("2.0")) return "2.0";
+  if (String(versionId).startsWith("3.0")) return "3.0";
   return "2.1";
 }
 
-function parseComponents(viz: any): ComponentRef[] {
-  const componentRoot = viz?.VisualizationInfo?.Components ?? viz?.Components ?? {};
-  const componentNodes = asArray(componentRoot?.Component);
-  const selected = new Set(asArray(componentRoot?.Selection?.Component).map((c: any) => attr(c, "IfcGuid") ?? attr(c, "Guid") ?? attr(c, "AuthoringToolId") ?? ""));
-  const visible = componentRoot?.Visibility?.DefaultVisibility;
-  const visibleComponents = new Set(asArray(componentRoot?.Visibility?.Exceptions?.Component).map((c: any) => attr(c, "IfcGuid") ?? attr(c, "Guid") ?? attr(c, "AuthoringToolId") ?? ""));
-
-  const refs = componentNodes.map((node: any) => {
-    const guid = attr(node, "IfcGuid") ?? attr(node, "Guid") ?? attr(node, "AuthoringToolId") ?? newGuid();
-    return {
-      guid,
-      ifcGuid: attr(node, "IfcGuid"),
-      authoringToolId: attr(node, "AuthoringToolId"),
-      elementId: attr(node, "OriginatingSystem") ?? attr(node, "ComponentId"),
-      visible: visible === "false" ? visibleComponents.has(guid) : true,
-      selected: selected.has(guid)
-    } satisfies ComponentRef;
-  });
-  return refs;
-}
-
-function parseCamera(viz: any): Viewpoint["camera"] | undefined {
-  const cam = viz?.VisualizationInfo?.PerspectiveCamera ?? viz?.PerspectiveCamera;
-  if (!cam) return undefined;
-  const pos = cam.CameraViewPoint ?? {};
-  const dir = cam.CameraDirection ?? {};
-  const up = cam.CameraUpVector ?? {};
+function parseProject(xml?: string): Pick<IssueProject, "projectId" | "name"> {
+  if (!xml) return { projectId: guid(), name: "BCF проект" };
+  const obj = convert(xml, { format: "object" }) as any;
+  const project = obj?.ProjectExtension?.Project ?? obj?.Project ?? {};
   return {
-    position: { x: Number(pos.X ?? 0), y: Number(pos.Y ?? 0), z: Number(pos.Z ?? 0) },
-    direction: { x: Number(dir.X ?? 0), y: Number(dir.Y ?? 0), z: Number(dir.Z ?? -1) },
-    up: { x: Number(up.X ?? 0), y: Number(up.Y ?? 1), z: Number(up.Z ?? 0) },
-    fieldOfView: Number(cam.FieldOfView ?? 60)
+    projectId: project?.["@ProjectId"] ?? project?.ProjectId ?? guid(),
+    name: project?.Name ?? "BCF проект"
   };
 }
 
-function viewpointFilename(vp: Viewpoint): string {
-  return `${vp.guid}.bcfv`;
+function extractValue(node: any, key: string): string | undefined {
+  return node?.[key] ?? node?.[`@${key}`] ?? undefined;
 }
 
-function snapshotFilename(vp: Viewpoint): string | undefined {
-  return vp.snapshotBase64 ? `${vp.guid}.png` : undefined;
+function parseViewpoint(xml: string, snapshotBase64?: string): Viewpoint {
+  const obj = convert(xml, { format: "object" }) as any;
+  const root = obj?.VisualizationInfo ?? {};
+  const camera = root?.PerspectiveCamera;
+  const selection = asArray(root?.Components?.Selection?.Component);
+  return {
+    guid: root?.["@Guid"] ?? guid(),
+    title: undefined,
+    snapshotBase64,
+    snapshotFileName: snapshotBase64 ? "snapshot.png" : undefined,
+    camera: camera ? {
+      position: {
+        x: Number(camera?.CameraViewPoint?.X ?? 0),
+        y: Number(camera?.CameraViewPoint?.Y ?? 0),
+        z: Number(camera?.CameraViewPoint?.Z ?? 0)
+      },
+      direction: {
+        x: Number(camera?.CameraDirection?.X ?? 0),
+        y: Number(camera?.CameraDirection?.Y ?? 0),
+        z: Number(camera?.CameraDirection?.Z ?? -1)
+      },
+      up: {
+        x: Number(camera?.CameraUpVector?.X ?? 0),
+        y: Number(camera?.CameraUpVector?.Y ?? 0),
+        z: Number(camera?.CameraUpVector?.Z ?? 1)
+      }
+    } : undefined,
+    componentsMode: root?.Components?.Visibility?.["@DefaultVisibility"] === "true" ? "Видимые" : "Выбранные",
+    components: selection.map((c: any) => ({
+      ifcGuid: c?.["@IfcGuid"],
+      modelRef: c?.["@OriginatingSystem"],
+      elementId: c?.["@AuthoringToolId"]
+    }))
+  };
 }
 
-export class BcfEngine implements BcfImportExport {
-  async detectVersion(buffer: Uint8Array): Promise<BcfVersion> {
-    const zip = await JSZip.loadAsync(buffer);
-    const versionFile = zip.file("bcf.version");
-    if (!versionFile) return "2.1";
-    const xml = await versionFile.async("string");
-    return readVersionXml(xml);
-  }
+function parseMarkup(xml: string, folder: string): Partial<IssueTopic> & { viewpointRefs: { guid: string; file: string; snapshot?: string }[] } {
+  const obj = convert(xml, { format: "object" }) as any;
+  const markup = obj?.Markup ?? {};
+  const topic = markup?.Topic ?? {};
+  const comments = asArray(markup?.Comment).map((c: any) => ({
+    guid: c?.["@Guid"] ?? guid(),
+    author: c?.Author ?? "unknown",
+    date: c?.Date ?? new Date().toISOString(),
+    message: c?.Comment ?? ""
+  }));
+  const viewRefs = asArray(markup?.Viewpoints?.ViewPoint).map((v: any) => ({
+    guid: attr(v) ?? v?.Guid ?? guid(),
+    file: v?.Viewpoint ?? `${attr(v) ?? v?.Guid}.bcfv`,
+    snapshot: v?.Snapshot
+  }));
+  return {
+    guid: topic?.["@Guid"] ?? folder,
+    title: topic?.Title ?? "Без названия",
+    description: topic?.Description ?? "",
+    status: topic?.["@TopicStatus"] ?? topic?.TopicStatus ?? "Активная",
+    type: topic?.["@TopicType"] ?? topic?.TopicType ?? "Замечание",
+    priority: topic?.Priority ?? "Обычный",
+    assignedTo: topic?.AssignedTo,
+    deadline: topic?.DueDate,
+    creationAuthor: topic?.CreationAuthor ?? "unknown",
+    creationDate: topic?.CreationDate ?? new Date().toISOString(),
+    modifiedAuthor: topic?.ModifiedAuthor,
+    modifiedDate: topic?.ModifiedDate,
+    labels: asArray(topic?.Labels?.Label).filter(Boolean),
+    comments,
+    viewpointRefs: viewRefs
+  };
+}
 
-  async read(buffer: Uint8Array): Promise<IssueProject> {
-    const zip = await JSZip.loadAsync(buffer);
-    const version = await this.detectVersion(buffer);
-
-    let projectId = newGuid();
-    let name = "Импортированный BCF проект";
-    const projectFile = zip.file("project.bcfp");
-    if (projectFile) {
-      const xml = await projectFile.async("string");
-      const doc = parseXml(xml);
-      projectId = textOf(doc?.ProjectExtension?.Project?.ProjectId, projectId) || textOf(doc?.Project?.ProjectId, projectId);
-      name = textOf(doc?.ProjectExtension?.Project?.Name, name) || textOf(doc?.Project?.Name, name);
+export class BcfValidator implements Validator {
+  validate(project: IssueProject, options: ExportOptions): ValidationResult {
+    const messages: ValidationMessage[] = [];
+    if (!project.name.trim()) messages.push({ level: "warning", message: "У проекта не задано имя." });
+    for (const topic of project.topics) {
+      if (!topic.guid) messages.push({ level: "error", message: `Замечание №${topic.number}: отсутствует GUID.` });
+      if (!topic.title.trim()) messages.push({ level: "error", message: `Замечание №${topic.number}: отсутствует заголовок.` });
+      for (const vp of topic.viewpoints) {
+        if (!vp.guid) messages.push({ level: "error", message: `Замечание №${topic.number}: viewpoint без GUID.` });
+      }
+      if (options.version === "2.0" && topic.viewpoints.length > 1) {
+        messages.push({ level: "warning", message: `Замечание №${topic.number}: для BCF 2.0 будет экспортирован только первый viewpoint.` });
+      }
     }
+    return { valid: messages.every(x => x.level !== "error"), messages };
+  }
+}
 
-    const topicFolders = new Set<string>();
+export class BcfZipWriter implements ArchiveWriter {
+  async write(project: IssueProject, options: ExportOptions): Promise<Uint8Array> {
+    const zip = new JSZip();
+    zip.file("bcf.version", makeVersionXml(options.version));
+    zip.file("project.bcfp", makeProjectXml(project));
+    for (const topic of project.topics) {
+      const folder = zip.folder(topic.guid)!;
+      const effectiveViewpoints = options.version === "2.0" ? topic.viewpoints.slice(0, 1) : topic.viewpoints;
+      folder.file("markup.bcf", buildMarkup({ ...topic, viewpoints: effectiveViewpoints }, options.version));
+      for (const vp of effectiveViewpoints) {
+        folder.file(`${vp.guid}.bcfv`, buildViewpoint(vp));
+        const bytes = toBuffer(vp.snapshotBase64);
+        if (bytes) folder.file(vp.snapshotFileName ?? `${vp.guid}.png`, bytes);
+      }
+    }
+    return zip.generateAsync({ type: "uint8array" });
+  }
+}
+
+export class BcfZipReader implements ArchiveReader {
+  async read(buffer: Uint8Array): Promise<ImportResult> {
+    const zip = await JSZip.loadAsync(buffer);
+    const version = parseVersion(await zip.file("bcf.version")?.async("string"));
+    const project = parseProject(await zip.file("project.bcfp")?.async("string"));
+    const folderNames = new Set<string>();
     for (const key of Object.keys(zip.files)) {
       const parts = key.split("/");
-      if (parts.length > 1 && parts[0]) topicFolders.add(parts[0]);
+      if (parts.length > 1 && parts[0] && !parts[0].startsWith("__MACOSX")) folderNames.add(parts[0]);
     }
-
     const topics: IssueTopic[] = [];
     let number = 1;
-    for (const folder of topicFolders) {
-      const markupFile = zip.file(`${folder}/markup.bcf`);
-      if (!markupFile) continue;
-      const markupXml = await markupFile.async("string");
-      const doc = parseXml(markupXml);
-      const markup = doc?.Markup ?? {};
-      const topicNode = markup?.Topic ?? {};
-      const commentNodes = asArray(markup?.Comment);
-      const viewpointNodes = asArray(markup?.Viewpoints?.ViewPoint ?? markup?.Viewpoint);
-
+    const warnings: string[] = [];
+    for (const folder of folderNames) {
+      const markupXml = await zip.file(`${folder}/markup.bcf`)?.async("string");
+      if (!markupXml) continue;
+      const parsed = parseMarkup(markupXml, folder);
       const viewpoints: Viewpoint[] = [];
-      for (let i = 0; i < viewpointNodes.length; i += 1) {
-        const vpNode = viewpointNodes[i];
-        const guid = attr(vpNode, "Guid") ?? textOf(vpNode, newGuid());
-        const fileName = textOf(vpNode, `${guid}.bcfv`) || `${guid}.bcfv`;
-        const vizFile = zip.file(`${folder}/${fileName}`);
-        let camera: Viewpoint["camera"] | undefined;
-        let components: ComponentRef[] = [];
-        if (vizFile) {
-          const vizXml = await vizFile.async("string");
-          const viz = parseXml(vizXml);
-          camera = parseCamera(viz);
-          components = parseComponents(viz);
+      for (const ref of parsed.viewpointRefs) {
+        const vpXml = await zip.file(`${folder}/${ref.file}`)?.async("string");
+        const snapshotFile = ref.snapshot ?? "snapshot.png";
+        const snapshotData = await zip.file(`${folder}/${snapshotFile}`)?.async("uint8array");
+        if (!vpXml) {
+          warnings.push(`Не найден viewpoint файл ${ref.file} для ${folder}`);
+          continue;
         }
-        const pngName = [`${guid}.png`, `snapshot.png`].find((candidate) => !!zip.file(`${folder}/${candidate}`));
-        let snapshotBase64: string | undefined;
-        if (pngName) {
-          const raw = await zip.file(`${folder}/${pngName}`)!.async("base64");
-          snapshotBase64 = `data:image/png;base64,${raw}`;
-        }
-        viewpoints.push({
-          guid,
-          title: `Вид ${i + 1}`,
-          index: i,
-          snapshotFileName: pngName,
-          snapshotBase64,
-          camera,
-          components
-        });
+        const vp = parseViewpoint(vpXml, fromBuffer(snapshotData));
+        vp.guid = ref.guid || vp.guid;
+        vp.snapshotFileName = snapshotData ? snapshotFile : undefined;
+        viewpoints.push(vp);
       }
-
-      const comments: CommentItem[] = commentNodes.map((node: any) => ({
-        guid: attr(node, "Guid") ?? newGuid(),
-        author: textOf(node?.Author, "unknown"),
-        date: textOf(node?.Date, new Date().toISOString()),
-        message: textOf(node?.Comment, ""),
-        viewpointGuid: textOf(node?.Viewpoint),
-        modifiedAuthor: textOf(node?.ModifiedAuthor, undefined as any),
-        modifiedDate: textOf(node?.ModifiedDate, undefined as any)
-      }));
-
       topics.push({
-        guid: attr(topicNode, "Guid") ?? folder,
+        guid: parsed.guid ?? guid(),
         number: number++,
-        title: textOf(topicNode?.Title, "Без названия"),
-        description: textOf(topicNode?.Description, ""),
-        status: detectIssueStatus(textOf(topicNode?.TopicStatus, textOf(topicNode?.Status))),
-        priority: detectIssuePriority(textOf(topicNode?.Priority)),
-        type: detectIssueType(textOf(topicNode?.TopicType, textOf(topicNode?.Type))),
-        labels: textOf(topicNode?.Labels, "").split(",").map((x) => x.trim()).filter(Boolean),
-        assignedTo: textOf(topicNode?.AssignedTo, "" ) || undefined,
-        area: textOf(topicNode?.TopicLabels?.Area, "") || undefined,
-        milestone: textOf(topicNode?.TopicLabels?.Milestone, "") || undefined,
-        deadline: textOf(topicNode?.DueDate, "") || undefined,
-        creationAuthor: textOf(topicNode?.CreationAuthor, "unknown"),
-        creationDate: textOf(topicNode?.CreationDate, new Date().toISOString()),
-        modifiedAuthor: textOf(topicNode?.ModifiedAuthor, "") || undefined,
-        modifiedDate: textOf(topicNode?.ModifiedDate, "") || undefined,
-        comments,
+        title: parsed.title ?? "Без названия",
+        description: parsed.description ?? "",
+        status: (parsed.status as IssueTopic["status"]) ?? "Активная",
+        priority: (parsed.priority as IssueTopic["priority"]) ?? "Обычный",
+        type: (parsed.type as IssueTopic["type"]) ?? "Замечание",
+        labels: parsed.labels ?? [],
+        assignedTo: parsed.assignedTo,
+        area: parsed.labels?.[0],
+        milestone: undefined,
+        deadline: parsed.deadline,
+        creationAuthor: parsed.creationAuthor ?? "unknown",
+        creationDate: parsed.creationDate ?? new Date().toISOString(),
+        modifiedAuthor: parsed.modifiedAuthor,
+        modifiedDate: parsed.modifiedDate,
+        comments: parsed.comments ?? [],
         viewpoints
       });
     }
-
-    return { projectId, name, topics, formatVersion: version };
-  }
-
-  validateProject(project: IssueProject, version: BcfVersion): ValidationResult {
-    const messages: ValidationMessage[] = [];
-    if (!project.name.trim()) messages.push({ level: "warning", message: "У проекта отсутствует имя." });
-    for (const topic of project.topics) {
-      if (!topic.guid) messages.push({ level: "error", message: `Замечание #${topic.number} без GUID.` });
-      if (!topic.title.trim()) messages.push({ level: "error", message: `Замечание #${topic.number} без заголовка.` });
-      for (const vp of topic.viewpoints) {
-        if (!vp.guid) messages.push({ level: "error", message: `Viewpoint в замечании #${topic.number} без GUID.` });
-        if (version === "2.0" && topic.labels.length > 0) {
-          messages.push({ level: "warning", message: `BCF 2.0: labels для замечания #${topic.number} будут сохранены как расширенные данные в описании.` });
-        }
-      }
-    }
-    return { ok: !messages.some((m) => m.level === "error"), messages };
-  }
-
-  async write(project: IssueProject, version: BcfVersion): Promise<Uint8Array> {
-    const validation = this.validateProject(project, version);
-    if (!validation.ok) {
-      throw new Error(validation.messages.filter((m) => m.level === "error").map((m) => m.message).join("\n"));
-    }
-
-    const zip = new JSZip();
-    const versionXml = create({ version: "1.0", encoding: "UTF-8" })
-      .ele("Version", { VersionId: version })
-      .end({ prettyPrint: true });
-    zip.file("bcf.version", versionXml);
-
-    const projectXml = create({ version: "1.0", encoding: "UTF-8" })
-      .ele("ProjectExtension")
-        .ele("Project")
-          .ele("Name").txt(project.name).up()
-          .ele("ProjectId").txt(project.projectId).up()
-        .up()
-      .up()
-      .end({ prettyPrint: true });
-    zip.file("project.bcfp", projectXml);
-
-    for (const topic of project.topics) {
-      const folder = zip.folder(topic.guid)!;
-      const root = create({ version: "1.0", encoding: "UTF-8" }).ele("Markup");
-      const topicEl = root.ele("Topic", { Guid: topic.guid });
-      topicEl.ele("Title").txt(topic.title).up();
-      topicEl.ele("Description").txt(topic.description || "").up();
-      topicEl.ele("CreationDate").txt(topic.creationDate).up();
-      topicEl.ele("CreationAuthor").txt(topic.creationAuthor).up();
-      topicEl.ele("ModifiedDate").txt(topic.modifiedDate ?? topic.creationDate).up();
-      topicEl.ele("ModifiedAuthor").txt(topic.modifiedAuthor ?? topic.creationAuthor).up();
-      topicEl.ele("TopicStatus").txt(toBcfStatus(topic.status)).up();
-      topicEl.ele("TopicType").txt(toBcfType(topic.type)).up();
-      topicEl.ele("Priority").txt(toBcfPriority(topic.priority)).up();
-      if (topic.assignedTo) topicEl.ele("AssignedTo").txt(topic.assignedTo).up();
-      if (topic.deadline) topicEl.ele("DueDate").txt(topic.deadline).up();
-      if (topic.labels.length > 0 && version !== "2.0") topicEl.ele("Labels").txt(topic.labels.join(", ")).up();
-      topicEl.up();
-
-      for (const comment of topic.comments) {
-        const commentEl = root.ele("Comment", { Guid: comment.guid });
-        commentEl.ele("Date").txt(comment.date).up();
-        commentEl.ele("Author").txt(comment.author).up();
-        commentEl.ele("Comment").txt(comment.message).up();
-        if (comment.viewpointGuid) commentEl.ele("Viewpoint").txt(viewpointFilename({ guid: comment.viewpointGuid, index: 0, components: [] })).up();
-        if (comment.modifiedAuthor) commentEl.ele("ModifiedAuthor").txt(comment.modifiedAuthor).up();
-        if (comment.modifiedDate) commentEl.ele("ModifiedDate").txt(comment.modifiedDate).up();
-        commentEl.up();
-      }
-
-      const viewpointsEl = root.ele("Viewpoints");
-      for (const vp of topic.viewpoints) {
-        viewpointsEl.ele("ViewPoint", { Guid: vp.guid }).txt(viewpointFilename(vp)).up();
-        folder.file(viewpointFilename(vp), this.buildVisualizationInfo(vp).end({ prettyPrint: true }));
-        const pngName = snapshotFilename(vp);
-        if (pngName && vp.snapshotBase64) {
-          const base64 = vp.snapshotBase64.includes(",") ? vp.snapshotBase64.split(",")[1] : vp.snapshotBase64;
-          folder.file(pngName, base64, { base64: true });
-        }
-      }
-      viewpointsEl.up();
-
-      folder.file("markup.bcf", root.end({ prettyPrint: true }));
-    }
-
-    return zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
-  }
-
-  private buildVisualizationInfo(vp: Viewpoint) {
-    const root = create({ version: "1.0", encoding: "UTF-8" }).ele("VisualizationInfo", { Guid: vp.guid });
-    if (vp.camera) {
-      const cam = root.ele("PerspectiveCamera");
-      cam.ele("CameraViewPoint")
-        .ele("X").txt(String(vp.camera.position.x)).up()
-        .ele("Y").txt(String(vp.camera.position.y)).up()
-        .ele("Z").txt(String(vp.camera.position.z)).up()
-      .up();
-      cam.ele("CameraDirection")
-        .ele("X").txt(String(vp.camera.direction.x)).up()
-        .ele("Y").txt(String(vp.camera.direction.y)).up()
-        .ele("Z").txt(String(vp.camera.direction.z)).up()
-      .up();
-      cam.ele("CameraUpVector")
-        .ele("X").txt(String(vp.camera.up.x)).up()
-        .ele("Y").txt(String(vp.camera.up.y)).up()
-        .ele("Z").txt(String(vp.camera.up.z)).up()
-      .up();
-      cam.ele("FieldOfView").txt(String(vp.camera.fieldOfView ?? 60)).up();
-      cam.up();
-    }
-    const componentsEl = root.ele("Components");
-    for (const component of vp.components) {
-      componentsEl.ele("Component", {
-        IfcGuid: component.ifcGuid ?? undefined,
-        AuthoringToolId: component.authoringToolId ?? component.elementId ?? component.guid,
-        OriginatingSystem: component.modelRef ?? undefined
-      }).up();
-    }
-    const selectionEl = componentsEl.ele("Selection");
-    for (const component of vp.components.filter((c) => c.selected)) {
-      selectionEl.ele("Component", {
-        IfcGuid: component.ifcGuid ?? undefined,
-        AuthoringToolId: component.authoringToolId ?? component.elementId ?? component.guid
-      }).up();
-    }
-    selectionEl.up();
-    const visibilityEl = componentsEl.ele("Visibility");
-    visibilityEl.ele("DefaultVisibility").txt("true").up();
-    visibilityEl.up();
-    componentsEl.up();
-    return root;
+    return {
+      project: { projectId: project.projectId, name: project.name, topics, importVersion: version, exportVersion: version },
+      detectedVersion: version,
+      container: ".bcfzip",
+      warnings
+    };
   }
 }

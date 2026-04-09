@@ -1,45 +1,64 @@
 import { BcfService } from "../application/BcfService";
-import { BcfEngine } from "../bcf/BcfEngine";
-import { InMemoryTopicStore } from "../infrastructure/InMemoryTopicStore";
-import { TopomaticAdapter } from "../topomatic/TopomaticAdapter";
 
-const sharedStore = new InMemoryTopicStore();
-const sharedEngine = new BcfEngine();
+type TreeTopicItem = TreeItem & { topicGuid?: string };
 
-function makeService(ctx: Context): BcfService {
-  const adapter = new TopomaticAdapter(ctx);
-  return new BcfService(sharedStore, sharedEngine, adapter, adapter);
+export function createCommands(service: BcfService) {
+  return {
+    async "bcf:open-manager"(_ctx: Context) {
+      await service.openManager();
+    },
+    async "bcf:create-topic"(_ctx: Context) {
+      await service.createIssueFromSelection();
+    },
+    async "bcf:import"(_ctx: Context) {
+      await service.importArchive();
+    },
+    async "bcf:export"(_ctx: Context) {
+      await service.exportArchive();
+    },
+    async "bcf:edit-selected-topic"(ctx: Context) {
+      const item = (ctx.treeview as TreeView<TreeTopicItem> | undefined)?.active;
+      await service.openEditor(item?.topicGuid ?? await service.getSelectedTopicGuid());
+    },
+    async "bcf:focus-selected-topic"(ctx: Context) {
+      const item = (ctx.treeview as TreeView<TreeTopicItem> | undefined)?.active;
+      const guid = item?.topicGuid ?? await service.getSelectedTopicGuid();
+      if (guid) await service.focusTopic(guid);
+    },
+    async "bcf:delete-selected-topic"(ctx: Context) {
+      const item = (ctx.treeview as TreeView<TreeTopicItem> | undefined)?.active;
+      const guid = item?.topicGuid ?? await service.getSelectedTopicGuid();
+      if (guid) await service.deleteTopic(guid);
+    },
+    async "bcf:add-comment-selected-topic"(ctx: Context) {
+      const item = (ctx.treeview as TreeView<TreeTopicItem> | undefined)?.active;
+      const guid = item?.topicGuid ?? await service.getSelectedTopicGuid();
+      if (!guid) return;
+      const message = await ctx.showInputBox({ prompt: "Комментарий", placeHolder: "Введите комментарий" });
+      if (message) await service.addComment(guid, message);
+    },
+    async "bcf:set-status-resolved"(ctx: Context) {
+      const item = (ctx.treeview as TreeView<TreeTopicItem> | undefined)?.active;
+      const guid = item?.topicGuid ?? await service.getSelectedTopicGuid();
+      if (guid) await service.setStatus(guid, "Устранена");
+    },
+    async "bcf:set-status-closed"(ctx: Context) {
+      const item = (ctx.treeview as TreeView<TreeTopicItem> | undefined)?.active;
+      const guid = item?.topicGuid ?? await service.getSelectedTopicGuid();
+      if (guid) await service.setStatus(guid, "Закрыта");
+    },
+    async "bcf:set-status-reopened"(ctx: Context) {
+      const item = (ctx.treeview as TreeView<TreeTopicItem> | undefined)?.active;
+      const guid = item?.topicGuid ?? await service.getSelectedTopicGuid();
+      if (guid) await service.setStatus(guid, "Переоткрыта");
+    },
+    async "bcf:about"(ctx: Context) {
+      const project = await service.getProject();
+      await ctx.showMessage([
+        "BCF Manager for Topomatic 360",
+        `Замечаний: ${project.topics.length}`,
+        `Версия по умолчанию: ${project.exportVersion ?? "2.1"}`
+      ].join("\n"), "info");
+    }
+  };
 }
-
-export async function bcf_open_manager(ctx: Context): Promise<void> {
-  return makeService(ctx).openManager();
-}
-
-export async function bcf_import(ctx: Context): Promise<void> {
-  return makeService(ctx).importArchive();
-}
-
-export async function bcf_export(ctx: Context): Promise<void> {
-  return makeService(ctx).exportArchive();
-}
-
-export async function bcf_create_topic(ctx: Context): Promise<void> {
-  return makeService(ctx).createTopic();
-}
-
-export async function bcf_open_topic(ctx: Context, args?: { guid?: string; topicGuid?: string }): Promise<void> {
-  const guid = args?.guid ?? args?.topicGuid;
-  if (!guid) return;
-  return makeService(ctx).openTopic(guid);
-}
-
-export async function bcf_about(ctx: Context): Promise<void> {
-  const output = ctx.createOutputChannel("BCF");
-  output.appendLine(`extension=${ctx.extension.manifest.name ?? "unknown"}`);
-  output.appendLine(`hasApp=${String(!!ctx.app)}`);
-  output.appendLine(`hasWindow=${String(!!ctx.window)}`);
-  output.appendLine(`hasCadview=${String(!!ctx.cadview)}`);
-  await ctx.showMessage("BCF-плагин инициализирован", "info");
-}
-
-export { sharedStore };

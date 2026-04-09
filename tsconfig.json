@@ -2,14 +2,21 @@
   "compilerOptions": {
     "target": "ES2021",
     "module": "ESNext",
-    "moduleResolution": "bundler",
+    "moduleResolution": "Node",
     "strict": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
-    "lib": ["ES2021", "DOM"]
+    "lib": [
+      "ES2021",
+      "DOM"
+    ]
   },
-  "include": ["src", "main.ts", "node_modules/albatros"]
+  "include": [
+    "src/**/*.ts",
+    "main.ts",
+    "node_modules/albatros/**/*.d.ts"
+  ]
 }

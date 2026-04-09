@@ -6,5 +6,9 @@
     "outDir": ".tmp-build",
     "rootDir": "."
   },
-  "include": ["main.ts", "src/**/*.ts", "node_modules/albatros"]
+  "include": [
+    "main.ts",
+    "src/**/*.ts",
+    "node_modules/albatros/**/*.d.ts"
+  ]
 }
