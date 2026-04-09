@@ -1,4 +1,4 @@
-# dkorchemnyi.topomatic360.bcf
+# bcf.topomatic360
 
 Плагин BCF для Topomatic 360.
 
