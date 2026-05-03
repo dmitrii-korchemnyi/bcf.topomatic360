@@ -127,19 +127,19 @@
       }
     },
     "views": {
-      "bcf_issue_tree": {
-        "label": "Замечания",
-        "type": "treeview",
-        "cmd": "build_bcf_issue_tree",
-        "container": "bcf_manager",
-        "expanded": true
-      },
       "bcf_issue_panel": {
-        "label": "Карточка",
+        "label": "Issues",
         "type": "defined",
         "cmd": "mount_bcf_panel",
         "container": "bcf_manager",
         "expanded": true
+      },
+      "bcf_issue_tree": {
+        "label": "TreeView",
+        "type": "treeview",
+        "cmd": "build_bcf_issue_tree",
+        "container": "bcf_manager",
+        "expanded": false
       }
     },
     "statusbar": {

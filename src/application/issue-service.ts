@@ -46,5 +46,6 @@ export function createIssue(input: CreateIssueInput): InternalBcfIssue {
 }
 
 export function isClosedIssue(issue: InternalBcfIssue): boolean {
-  return issue.status.toLocaleLowerCase("ru-RU") === "закрыто" || issue.status.toLocaleLowerCase("en-US") === "closed";
+  const status = issue.status.toLocaleLowerCase("ru-RU");
+  return status === "закрыто" || status === "closed" || status === "resolved" || status === "решено";
 }
