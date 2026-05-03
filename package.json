@@ -17,6 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@parametricos/bcf-js": "^0.3.2",
     "fast-xml-parser": "^4.5.0",
     "jszip": "^3.10.1",
     "xmlbuilder2": "^3.1.1",
@@ -70,12 +71,24 @@
       {
         "label": "BCF",
         "submenu": [
-          { "action": "bcf_open_panel" },
-          { "tag": "s" },
-          { "action": "bcf_import" },
-          { "action": "bcf_export" },
-          { "tag": "s" },
-          { "action": "bcf_create_issue" }
+          {
+            "action": "bcf_open_panel"
+          },
+          {
+            "tag": "s"
+          },
+          {
+            "action": "bcf_import"
+          },
+          {
+            "action": "bcf_export"
+          },
+          {
+            "tag": "s"
+          },
+          {
+            "action": "bcf_create_issue"
+          }
         ]
       }
     ],
@@ -88,24 +101,43 @@
             "tag": "bcf_main_group",
             "label": "Замечания",
             "items": [
-              { "tag": "bt", "action": "bcf_create_issue" },
-              { "tag": "b", "action": "bcf_open_panel" },
-              { "tag": "b", "action": "bcf_refresh" }
+              {
+                "tag": "bt",
+                "action": "bcf_create_issue"
+              },
+              {
+                "tag": "b",
+                "action": "bcf_open_panel"
+              },
+              {
+                "tag": "b",
+                "action": "bcf_refresh"
+              }
             ]
           },
           {
             "tag": "bcf_io_group",
             "label": "Обмен",
             "items": [
-              { "tag": "b", "action": "bcf_import" },
-              { "tag": "b", "action": "bcf_export" }
+              {
+                "tag": "b",
+                "action": "bcf_import"
+              },
+              {
+                "tag": "b",
+                "action": "bcf_export"
+              }
             ]
           },
           {
             "tag": "bcf_filter_group",
             "label": "Фильтр",
             "items": [
-              { "tag": "cb", "dynamic": "bcf_status_filter", "width": 140 }
+              {
+                "tag": "cb",
+                "dynamic": "bcf_status_filter",
+                "width": 140
+              }
             ]
           }
         ]
@@ -113,10 +145,18 @@
     ],
     "context": {
       "bcfIssueContext": [
-        { "action": "bcf_open_panel" },
-        { "action": "bcf_create_issue" },
-        { "tag": "s" },
-        { "action": "bcf_export" }
+        {
+          "action": "bcf_open_panel"
+        },
+        {
+          "action": "bcf_create_issue"
+        },
+        {
+          "tag": "s"
+        },
+        {
+          "action": "bcf_export"
+        }
       ]
     },
     "viewsContainers": {

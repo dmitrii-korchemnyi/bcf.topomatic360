@@ -4,7 +4,7 @@ import { buildXml } from "./xml";
 
 export async function serializeBcfZip(project: InternalBcfProject, version: BcfVersion): Promise<Uint8Array> {
   const zip = new JSZip();
-  zip.file("bcf.version", buildXml({ Version: { "@VersionId": version } }));
+  zip.file("bcf.version", buildXml({ Version: { "@VersionId": version, DetailedVersion: version } }));
   zip.file("project.bcfp", buildProject(project));
 
   for (const issue of project.issues) {

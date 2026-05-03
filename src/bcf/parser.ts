@@ -13,8 +13,81 @@ import { BcfUserError } from "../utils/errors";
 import { createGuid } from "../utils/ids";
 import { asArray, attr, isRecord, node, text, xmlParser } from "./xml";
 import { bcfVersionSchema } from "./schema";
+import { parseBcfZipWithBcfJs } from "./bcf-js-adapter";
 
 export async function parseBcfZip(data: Uint8Array): Promise<InternalBcfProject> {
+  const version = await detectBcfZipVersion(data);
+  if (version !== "2.0") {
+    try {
+      const openSourceProject = await parseBcfZipWithBcfJs(data, version);
+      const fallbackProject = await parseBcfZipFallback(data);
+      return mergeParsedProjects(openSourceProject, fallbackProject);
+    } catch {
+      return parseBcfZipFallback(data);
+    }
+  }
+
+  return parseBcfZipFallback(data);
+}
+
+function mergeParsedProjects(primary: InternalBcfProject, fallback: InternalBcfProject): InternalBcfProject {
+  const fallbackByGuid = new Map(fallback.issues.map((issue) => [issue.guid, issue]));
+
+  return {
+    ...primary,
+    projectId: primary.projectId || fallback.projectId,
+    name: primary.name || fallback.name,
+    issues: primary.issues.map((issue) => {
+      const fallbackIssue = fallbackByGuid.get(issue.guid);
+      if (!fallbackIssue) {
+        return issue;
+      }
+
+      return {
+        ...fallbackIssue,
+        ...issue,
+        description: issue.description ?? fallbackIssue.description,
+        priority: issue.priority ?? fallbackIssue.priority,
+        assignedTo: issue.assignedTo ?? fallbackIssue.assignedTo,
+        labels: issue.labels?.length ? issue.labels : fallbackIssue.labels,
+        comments: issue.comments.length > 0 ? issue.comments : fallbackIssue.comments,
+        viewpoints: mergeViewpoints(issue.viewpoints, fallbackIssue.viewpoints),
+        snippets: issue.snippets?.length ? issue.snippets : fallbackIssue.snippets
+      };
+    })
+  };
+}
+
+function mergeViewpoints(primary: InternalBcfProject["issues"][number]["viewpoints"], fallback: InternalBcfProject["issues"][number]["viewpoints"]) {
+  if (primary.length === 0) {
+    return fallback;
+  }
+
+  return primary.map((viewpoint, index) => {
+    const fallbackViewpoint = fallback.find((candidate) => candidate.guid === viewpoint.guid) ?? fallback[index];
+    if (!fallbackViewpoint) {
+      return viewpoint;
+    }
+
+    return {
+      ...fallbackViewpoint,
+      ...viewpoint,
+      snapshot: viewpoint.snapshot ?? fallbackViewpoint.snapshot,
+      perspectiveCamera: viewpoint.perspectiveCamera ?? fallbackViewpoint.perspectiveCamera,
+      orthogonalCamera: viewpoint.orthogonalCamera ?? fallbackViewpoint.orthogonalCamera,
+      clippingPlanes: viewpoint.clippingPlanes.length > 0 ? viewpoint.clippingPlanes : fallbackViewpoint.clippingPlanes,
+      components: hasComponents(viewpoint) ? viewpoint.components : fallbackViewpoint.components
+    };
+  });
+}
+
+function hasComponents(viewpoint: InternalBcfProject["issues"][number]["viewpoints"][number]): boolean {
+  return viewpoint.components.selection.length > 0 ||
+    viewpoint.components.visibility.exceptions.length > 0 ||
+    viewpoint.components.coloring.length > 0;
+}
+
+async function parseBcfZipFallback(data: Uint8Array): Promise<InternalBcfProject> {
   const zip = await JSZip.loadAsync(data);
   const versionFile = zip.file("bcf.version");
   const projectFile = zip.file("project.bcfp");
@@ -34,10 +107,19 @@ export async function parseBcfZip(data: Uint8Array): Promise<InternalBcfProject>
   return project;
 }
 
+async function detectBcfZipVersion(data: Uint8Array): Promise<BcfVersion> {
+  const zip = await JSZip.loadAsync(data);
+  const versionFile = zip.file("bcf.version");
+  if (!versionFile) {
+    throw new BcfUserError("Ошибка: отсутствует bcf.version");
+  }
+  return parseVersion(await versionFile.async("string"));
+}
+
 function parseVersion(xml: string): BcfVersion {
   const parsed = xmlParser.parse(xml);
   const versionNode = node(parsed, "Version");
-  const version = attr(versionNode, "VersionId") ?? text(node(versionNode, "VersionId"));
+  const version = attr(versionNode, "VersionId") ?? text(node(versionNode, "VersionId")) ?? text(node(versionNode, "DetailedVersion"));
   const result = bcfVersionSchema.safeParse(version);
   if (!result.success) {
     throw new BcfUserError("Ошибка: неподдерживаемая версия");
