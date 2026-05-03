@@ -1,9 +1,16 @@
-export function guid(): string {
-  const c: Crypto | undefined = (globalThis as { crypto?: Crypto }).crypto;
-  if (c?.randomUUID) return c.randomUUID();
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (s) => {
-    const r = Math.random() * 16 | 0;
-    const v = s === "x" ? r : ((r & 0x3) | 0x8);
-    return v.toString(16);
+export function createGuid(): string {
+  const cryptoApi = globalThis.crypto;
+  if (cryptoApi?.randomUUID) {
+    return cryptoApi.randomUUID();
+  }
+
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (token) => {
+    const random = Math.floor(Math.random() * 16);
+    const value = token === "x" ? random : (random & 0x3) | 0x8;
+    return value.toString(16);
   });
+}
+
+export function isGuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

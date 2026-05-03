@@ -21,3 +21,4 @@ Thumbs.db
 *.gz
 *.db
 *.sqlite
+.apx/

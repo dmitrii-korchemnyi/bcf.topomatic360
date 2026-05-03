@@ -1,124 +1,146 @@
 export type BcfVersion = "2.0" | "2.1" | "3.0";
-export type BcfContainer = ".bcfzip" | ".bcf";
 
-export type IssueStatus = "Новая" | "Активная" | "В работе" | "Устранена" | "Закрыта" | "Переоткрыта";
-export type IssuePriority = "Низкий" | "Обычный" | "Высокий" | "Критический";
-export type IssueType = "Замечание" | "Коллизия" | "Проверка" | "Вопрос" | "Предложение" | "Ошибка моделирования";
-export type ComponentsMode = "Видимые" | "Выбранные" | "Все связанные";
+export interface InternalBcfProject {
+  projectId: string;
+  name: string;
+  issues: InternalBcfIssue[];
+  extensions?: InternalBcfExtensions;
+  sourceVersion?: BcfVersion;
+}
 
-export interface Point3D {
+export interface InternalBcfExtensions {
+  topicTypes: string[];
+  topicStatuses: string[];
+  priorities: string[];
+  users: string[];
+  labels: string[];
+  stages: string[];
+}
+
+export interface InternalBcfIssue {
+  guid: string;
+  displayId?: string;
+  serverAssignedId?: string;
+  title: string;
+  description?: string;
+  status: string;
+  type: string;
+  priority?: string;
+  assignedTo?: string;
+  labels?: string[];
+  stage?: string;
+  dueDate?: string;
+  creationDate: string;
+  creationAuthor: string;
+  modifiedDate?: string;
+  modifiedAuthor?: string;
+  comments: InternalBcfComment[];
+  viewpoints: InternalBcfViewpoint[];
+  snippets?: InternalBcfSnippet[];
+}
+
+export interface InternalBcfComment {
+  guid: string;
+  date: string;
+  author: string;
+  text: string;
+  viewpointGuid?: string;
+  modifiedDate?: string;
+  modifiedAuthor?: string;
+}
+
+export interface InternalBcfViewpoint {
+  guid: string;
+  index: number;
+  filename: string;
+  snapshot?: InternalBcfSnapshot;
+  perspectiveCamera?: InternalBcfPerspectiveCamera;
+  orthogonalCamera?: InternalBcfOrthogonalCamera;
+  components: InternalBcfComponents;
+  clippingPlanes: InternalBcfClippingPlane[];
+  bitmaps?: InternalBcfBitmap[];
+  lines?: InternalBcfLine[];
+}
+
+export interface InternalBcfSnapshot {
+  filename: string;
+  mimeType: "image/png" | "image/jpeg";
+  data: Uint8Array;
+}
+
+export interface InternalBcfPoint {
   x: number;
   y: number;
   z: number;
 }
 
-export interface CameraState {
-  position: Point3D;
-  direction: Point3D;
-  up: Point3D;
+export interface InternalBcfVector extends InternalBcfPoint {}
+
+export interface InternalBcfPerspectiveCamera {
+  cameraViewPoint: InternalBcfPoint;
+  cameraDirection: InternalBcfVector;
+  cameraUpVector: InternalBcfVector;
+  fieldOfView: number;
+  aspectRatio?: number;
 }
 
-export interface ComponentRef {
-  elementId?: string;
+export interface InternalBcfOrthogonalCamera {
+  cameraViewPoint: InternalBcfPoint;
+  cameraDirection: InternalBcfVector;
+  cameraUpVector: InternalBcfVector;
+  viewToWorldScale: number;
+  aspectRatio?: number;
+}
+
+export interface InternalBcfClippingPlane {
+  location: InternalBcfPoint;
+  direction: InternalBcfVector;
+}
+
+export interface InternalBcfComponents {
+  selection: InternalBcfComponentRef[];
+  visibility: {
+    defaultVisibility: boolean;
+    exceptions: InternalBcfComponentRef[];
+  };
+  coloring: InternalBcfComponentColoring[];
+}
+
+export interface InternalBcfComponentRef {
   ifcGuid?: string;
-  modelRef?: string;
-  layerName?: string;
-  elementName?: string;
-  elementType?: string;
+  originatingSystem?: string;
+  authoringToolId?: string;
 }
 
-export interface Viewpoint {
-  guid: string;
-  title?: string;
-  snapshotFileName?: string;
-  snapshotBase64?: string;
-  camera?: CameraState;
-  componentsMode: ComponentsMode;
-  components: ComponentRef[];
+export interface InternalBcfComponentColoring {
+  color: string;
+  components: InternalBcfComponentRef[];
 }
 
-export interface CommentItem {
-  guid: string;
-  author: string;
-  date: string;
+export interface InternalBcfBitmap {
+  reference: string;
+  format?: string;
+}
+
+export interface InternalBcfLine {
+  startPoint: InternalBcfPoint;
+  endPoint: InternalBcfPoint;
+}
+
+export interface InternalBcfSnippet {
+  type: string;
+  reference?: string;
+  referenceSchema?: string;
+  content?: string;
+}
+
+export interface InternalBcfValidationMessage {
+  code: string;
   message: string;
-  modifiedDate?: string;
-  modifiedAuthor?: string;
+  path: string;
 }
 
-export interface IssueTopic {
-  guid: string;
-  number: number;
-  title: string;
-  description: string;
-  status: IssueStatus;
-  priority: IssuePriority;
-  type: IssueType;
-  labels: string[];
-  assignedTo?: string;
-  area?: string;
-  milestone?: string;
-  deadline?: string;
-  creationAuthor: string;
-  creationDate: string;
-  modifiedAuthor?: string;
-  modifiedDate?: string;
-  comments: CommentItem[];
-  viewpoints: Viewpoint[];
+export interface InternalBcfValidationResult {
+  errors: InternalBcfValidationMessage[];
+  warnings: InternalBcfValidationMessage[];
 }
-
-export interface IssueProject {
-  projectId: string;
-  name: string;
-  topics: IssueTopic[];
-  importVersion?: BcfVersion;
-  exportVersion?: BcfVersion;
-}
-
-export interface ImportResult {
-  project: IssueProject;
-  detectedVersion: BcfVersion;
-  container: BcfContainer;
-  warnings: string[];
-}
-
-export interface ExportOptions {
-  version: BcfVersion;
-  container: BcfContainer;
-}
-
-export interface ValidationMessage {
-  level: "error" | "warning";
-  message: string;
-}
-
-export interface ValidationResult {
-  valid: boolean;
-  messages: ValidationMessage[];
-}
-
-export interface TopicDraft {
-  title: string;
-  description: string;
-  status: IssueStatus;
-  priority: IssuePriority;
-  type: IssueType;
-  labels: string[];
-  assignedTo?: string;
-  area?: string;
-  milestone?: string;
-  deadline?: string;
-}
-
-export const DEFAULT_TOPIC_DRAFT: TopicDraft = {
-  title: "",
-  description: "",
-  status: "Новая",
-  priority: "Обычный",
-  type: "Замечание",
-  labels: [],
-  assignedTo: "",
-  area: "",
-  milestone: "",
-  deadline: ""
-};
