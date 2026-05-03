@@ -1,46 +1,116 @@
 # BCF Manager для Topomatic 360
 
-Production-ready TypeScript-плагин для Albatros SDK: импорт, просмотр, создание, редактирование и экспорт BCFZIP 2.0 / 2.1 / 3.0.
+Плагин для работы с замечаниями в формате BCF в Topomatic 360 Desktop.
 
-## Архитектура
+Поддерживаются импорт, просмотр, редактирование и экспорт BCFZIP-файлов. Интерфейс построен вокруг списка замечаний: таблица issues, фильтр, поиск, карточка выбранного замечания, комментарии и основные поля редактирования.
 
-- `src/domain` — чистая внутренняя модель BCF.
-- `src/application` — бизнес-логика и store.
-- `src/bcf` — BCFZIP/XML parser, serializer, validation.
-- `src/topomatic` — adapter layer к разрешённым Albatros API.
-- `src/ui` — BIMcollab-like defined panel без зависимости от BCF XML.
-- `src/commands` и `src/providers` — точки входа Albatros.
+## Возможности
 
-BCF engine не импортирует Topomatic API. UI работает только с internal model. Topomatic API изолирован в adapter layer.
+- импорт BCFZIP;
+- автоматическое определение версии BCF;
+- поддержка BCF 2.0, 2.1 и 3.0;
+- просмотр списка замечаний;
+- поиск и фильтрация по статусу;
+- просмотр описания, комментариев и snapshot;
+- редактирование title, description, status, type, priority и assigned to;
+- создание замечания из текущего контекста модели, если доступны selection/camera/snapshot;
+- экспорт BCFZIP 2.0, 2.1 или 3.0;
+- базовая валидация проекта перед импортом и экспортом.
 
-## Запуск
+## Структура проекта
+
+```text
+src/
+  application/  бизнес-логика и состояние проекта
+  bcf/          чтение, запись и проверка BCFZIP
+  commands/     команды Albatros
+  domain/       внутренняя модель данных
+  providers/    TreeView-провайдер
+  topomatic/    адаптеры к API Topomatic 360 / Albatros
+  ui/           интерфейс BCF Manager
+  utils/        общие утилиты
+tests/          тесты импорта, экспорта и сервисов
+```
+
+BCF-слой не зависит от Topomatic API. UI работает с внутренней моделью, а обращения к Albatros вынесены в `src/topomatic`.
+
+## Установка
+
+Требования:
+
+- Node.js 18 или новее;
+- npm;
+- Topomatic 360 Desktop с поддержкой Albatros SDK.
+
+Установка зависимостей:
 
 ```bash
 npm install
+```
+
+## Разработка
+
+Проверка типов:
+
+```bash
 npm run typecheck
+```
+
+Сборка:
+
+```bash
 npm run build
+```
+
+Тесты:
+
+```bash
+npm test
+```
+
+Запуск плагина в режиме разработки:
+
+```bash
 npm run serve
 ```
 
-## Деплой
+После запуска откройте Topomatic 360 Desktop и подключите плагин через стандартный механизм Albatros.
 
-1. Выполнить `npm run build`.
-2. Выполнить `npm run serve` для локальной проверки в Topomatic 360.
-3. Для публикации собрать `.apx` через `albatros-cli build` или разместить сборку как статический плагин согласно правилам Albatros.
+## Использование
 
-## QA checklist
+В Topomatic появится раздел `BCF`.
 
-- Импортировать BCFZIP 2.0, 2.1 и 3.0.
-- Проверить блокировку импорта при отсутствии `bcf.version`, `project.bcfp`, `markup.bcf`.
-- Проверить предупреждения: нет snapshot, нет components, нет camera.
-- Создать замечание из модели, проверить selection, snapshot и статус-бар.
-- Изменить Title/Description/Status в панели.
-- Экспортировать BCFZIP 2.0, 2.1 и 3.0.
-- Выполнить import → export → import без потери topics/comments/viewpoints/snapshots/components.
-- Открыть архив в BIMcollab, Navisworks и Solibri.
+Основные команды:
 
-## Known limitations
+- `Открыть BCF Manager` — открывает панель со списком замечаний;
+- `Импорт BCF` — загружает `.bcfzip`;
+- `Экспорт BCF` — сохраняет текущий набор замечаний в `.bcfzip`;
+- `Создать замечание` — создаёт issue из текущего контекста модели;
+- `Обновить` — обновляет панель и строку состояния.
 
-- Формат результата `ctx.openDialog` и `ctx.saveDialog` в установленном Albatros SDK должен быть подтверждён. Код не использует запрещённые `pickOpenFile`, `saveBinary`, `showHtmlPanel`; adapter принимает только структурно обнаруженные `Blob`, `ArrayBuffer`, `Uint8Array`, `read()` и `write()`.
-- Камера, selection и snapshot читаются только если соответствующие поля или методы реально присутствуют в `ctx.cadview`; неподдержанные данные не имитируются, а дают warning.
-- BCF API / OpenCDE не реализован в v1.0, но архитектура оставляет его отдельным application/adapter слоем.
+При импорте ошибки блокируют загрузку файла. Предупреждения показываются пользователю, но не мешают открыть файл.
+
+## Проверки
+
+Перед публикацией стоит пройти короткий сценарий:
+
+1. Импортировать BCFZIP 2.0, 2.1 и 3.0.
+2. Проверить список issues и карточку выбранного замечания.
+3. Изменить статус и описание.
+4. Экспортировать файл в BCFZIP.
+5. Повторно импортировать экспортированный файл.
+6. Проверить архив во внешнем BCF-клиенте, например BIMcollab Zoom.
+
+## Сборка для публикации
+
+```bash
+npm run build
+```
+
+Проект настроен как Albatros-плагин с `apx: true`. Для выпуска используйте стандартную сборку через `albatros-cli build` или другой принятый в проекте процесс публикации плагинов Topomatic 360.
+
+## Ограничения
+
+- Работа с файлами зависит от фактического формата результата `ctx.openDialog` и `ctx.saveDialog` в установленной версии Albatros SDK.
+- Данные камеры, selection и snapshot сохраняются только если они доступны через текущий `ctx.cadview`.
+- BCF API / OpenCDE в этой версии не реализован.
